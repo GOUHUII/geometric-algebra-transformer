@@ -1,0 +1,73 @@
+exp_name: omad6
+run_name: ???
+
+base_dir: ???
+exp_dir: '${base_dir}/experiments/${exp_name}/${run_name}'
+
+seed: ???
+debug: false
+
+checkpoint: null
+
+data:
+  data_dir: '${base_dir}/data/OMAD-6'  # OMAD-6数据集路径
+  subsample: null  # 子采样率，用于快速实验
+  
+  # 数据参数
+  image_size: 256  # 图像尺寸
+  max_items: 1024  # 每张图像最大像素数量
+  num_classes: 11  # 分割类别数量（包含背景）
+  
+  # 网络输入输出通道
+  mv_channels_in: 4    # 多重向量输入通道：坐标点 + R + G + B
+  mv_channels_out: 1   # 多重向量输出通道：分割特征
+  scalar_channels_in: 1   # 标量输入通道
+  scalar_channels_out: 1  # 标量输出通道
+
+training:
+  # 训练参数
+  steps: 10000
+  batchsize: 4  # 较小的批次大小，因为图像分割内存消耗大
+  eval_batchsize: 2
+  
+  # 优化器参数
+  lr: 1e-4  # 较小的学习率，适合图像分割
+  lr_decay: 0.1
+  clip_grad_norm: 1.0
+  weight_decay: 1e-4
+  
+  # 训练策略
+  early_stopping: true
+  
+  # 精度和优化
+  float16: false  # 暂时禁用混合精度，避免数值不稳定
+  ema: false
+  
+  # 日志和验证频率
+  log_every_n_steps: 50
+  validate_every_n_steps: 500
+  plot_every_n_steps: 1000
+  save_model_every_n_steps: 1000
+  update_lr_every_n_steps: 500
+  
+  # 设备和调试
+  eval_device: cuda
+  progressbar: true
+  detect_anomaly: false
+  num_workers: 2
+  
+  # 注意力优化
+  force_xformers: false
+  enable_flash_sdp: false
+  enable_math_sdp: true
+  enable_mem_efficient_sdp: false
+
+# MLflow跟踪
+mlflow:
+  db: '${base_dir}/tracking/mlflow.db'
+  artifacts: '${base_dir}/tracking/artifacts'
+
+defaults:
+  - model: gatr_omad6  # 默认使用GATr模型
+  - hydra
+  - _self_

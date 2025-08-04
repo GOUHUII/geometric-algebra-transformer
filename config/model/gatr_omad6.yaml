@@ -1,0 +1,46 @@
+# GATr模型配置，用于OMAD-6图像分割
+
+# 模型类型
+_target_: gatr.experiments.omad6.wrappers.OMAD6GATrWrapper
+
+# 网络参数
+net:
+  _target_: gatr.nets.gatr.GATr
+  
+  # 输入输出通道
+  in_mv_channels: ${data.mv_channels_in}      # 4: 坐标点 + R + G + B
+  out_mv_channels: ${data.mv_channels_out}    # 1: 分割特征
+  hidden_mv_channels: 32                      # 隐藏多重向量通道数
+  
+  in_s_channels: ${data.scalar_channels_in}   # 1: dummy标量输入
+  out_s_channels: ${data.scalar_channels_out} # 1: 标量输出用于分类
+  hidden_s_channels: 16                       # 隐藏标量通道数
+  
+  # 网络结构
+  num_blocks: 8  # transformer块数量，相对较少以控制计算量
+  
+  # 注意力配置
+  attention:
+    _target_: gatr.layers.attention.config.SelfAttentionConfig
+    num_heads: 4  # 注意力头数
+    key_query_embed_dim: 128
+    value_embed_dim: 128
+    hidden_dim: 256
+    pos_encodings: false
+    output_init: small
+    
+  # MLP配置  
+  mlp:
+    _target_: gatr.layers.mlp.config.MLPConfig
+    hidden_dim: 128
+    num_layers: 2
+    output_init: small
+    
+  # 正则化
+  dropout_prob: 0.1
+  
+  # 性能优化
+  checkpoint: null  # 梯度检查点，可选 ["block", "mlp", "attention"]
+
+# 分割特定参数
+num_classes: ${data.num_classes}  # 分割类别数量
