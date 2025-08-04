@@ -1,0 +1,8 @@
+[2025-08-04 08:02:55 I] Hoi.
+[2025-08-04 08:02:56 I] Created experiment arteries with ID 1
+[2025-08-04 08:02:56 I] Set experiment arteries with ID 1, artifact location file:/app/tracking/artifacts
+[2025-08-04 08:02:56 I] Logger already initialized - hi again!
+[2025-08-04 08:02:56 I] Running experiment at /app/experiments/arteries/gatr
+[2025-08-04 08:02:57 I] Saving config at /app/experiments/arteries/gatr/config.yml
+[2025-08-04 08:02:59 I] Model has 0.25M learnable parameters
+[2025-08-04 08:02:59 I] Starting training

@@ -1,0 +1,82 @@
+model:
+  net:
+    attention:
+      multi_query: true
+      in_mv_channels: null
+      out_mv_channels: null
+      in_s_channels: null
+      out_s_channels: null
+      num_heads: 4
+      additional_qk_mv_channels: 0
+      additional_qk_s_channels: 0
+      normalizer_eps: 0.001
+      pos_encoding: false
+      pos_enc_base: 4096
+      output_init: default
+      checkpoint: true
+      increase_hidden_channels: 2
+      dropout_prob: null
+    mlp:
+      mv_channels: null
+      s_channels: null
+      activation: gelu
+      dropout_prob: null
+    _target_: gatr.nets.GATr
+    in_mv_channels: ${data.mv_channels_in}
+    out_mv_channels: ${data.mv_channels_out}
+    hidden_mv_channels: 8
+    in_s_channels: ${data.scalar_channels_in}
+    out_s_channels: ${data.scalar_channels_out}
+    hidden_s_channels: 32
+    num_blocks: 10
+    reinsert_mv_channels:
+    - 0
+    reinsert_s_channels: null
+    dropout_prob: null
+    checkpoint_blocks: true
+  _target_: gatr.experiments.arteries.wrappers.ArteryGATrWrapper
+exp_name: arteries
+run_name: gatr
+base_dir: /app
+exp_dir: ${base_dir}/experiments/${exp_name}/${run_name}
+seed: 42
+debug: false
+checkpoint: null
+data:
+  data_dir: ''
+  subsample: null
+  mv_channels_in: 3
+  mv_channels_out: 1
+  scalar_channels_in: 1
+  scalar_channels_out: 1
+  baseline_channels_in: 7
+  baseline_channels_out: 3
+  rotate_train: true
+  rotate_test: true
+training:
+  output_regularization: 0
+  steps: 50000
+  batchsize: 8
+  eval_batchsize: 1
+  lr: 0.0003
+  lr_decay: 0.1
+  clip_grad_norm: 10.0
+  weight_decay: 0.0
+  early_stopping: true
+  float16: false
+  ema: false
+  log_every_n_steps: 100
+  validate_every_n_steps: 1000
+  plot_every_n_steps: 10000
+  save_model_every_n_steps: 1000
+  update_lr_every_n_steps: 1000
+  eval_device: cuda
+  progressbar: true
+  detect_anomaly: false
+  force_xformers: false
+  enable_flash_sdp: false
+  enable_math_sdp: true
+  enable_mem_efficient_sdp: false
+mlflow:
+  db: ${base_dir}/tracking/mlflow.db
+  artifacts: ${base_dir}/tracking/artifacts

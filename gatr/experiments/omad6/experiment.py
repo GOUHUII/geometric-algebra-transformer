@@ -3,7 +3,7 @@
 """OMAD-6 图像分割实验管理器"""
 
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -105,7 +105,7 @@ class OMAD6Experiment(BaseExperiment):
         
         return dataloader
     
-    def _forward(self, *data) -> tuple[torch.Tensor, Dict[str, float]]:
+    def _forward(self, *data) -> Tuple[torch.Tensor, Dict[str, float]]:
         """模型前向传播
         
         Parameters

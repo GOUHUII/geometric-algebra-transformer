@@ -4,6 +4,7 @@
 
 import torch
 import torch.nn.functional as F
+from typing import Tuple
 
 from gatr.experiments.base_wrapper import BaseWrapper
 from gatr.interface import embed_point, embed_scalar, extract_scalar
@@ -76,7 +77,7 @@ class OMAD6GATrWrapper(BaseWrapper):
         self.num_classes = num_classes
         self.supports_variable_items = True
     
-    def embed_into_ga(self, inputs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def embed_into_ga(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """将原始像素数据嵌入到几何代数表示中
         
         Parameters
@@ -103,7 +104,7 @@ class OMAD6GATrWrapper(BaseWrapper):
         
         return mv_inputs, scalar_inputs
     
-    def extract_from_ga(self, multivector: torch.Tensor, scalars: torch.Tensor) -> tuple[torch.Tensor, None]:
+    def extract_from_ga(self, multivector: torch.Tensor, scalars: torch.Tensor) -> Tuple[torch.Tensor, None]:
         """从几何代数表示中提取分割预测
         
         Parameters
@@ -163,7 +164,7 @@ class OMAD6AxialGATrWrapper(BaseWrapper):
         self.image_size = image_size
         self.supports_variable_items = False  # AxialGATr需要固定的网格大小
     
-    def embed_into_ga(self, inputs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def embed_into_ga(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """将像素数据嵌入并重塑为2D网格格式
         
         Parameters
@@ -195,7 +196,7 @@ class OMAD6AxialGATrWrapper(BaseWrapper):
         
         return mv_inputs, scalar_inputs
     
-    def extract_from_ga(self, multivector: torch.Tensor, scalars: torch.Tensor) -> tuple[torch.Tensor, None]:
+    def extract_from_ga(self, multivector: torch.Tensor, scalars: torch.Tensor) -> Tuple[torch.Tensor, None]:
         """从2D网格格式的几何代数表示中提取分割预测
         
         Parameters
