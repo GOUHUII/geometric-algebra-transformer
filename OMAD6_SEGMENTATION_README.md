@@ -89,7 +89,7 @@ python scripts/omad6_experiment.py base_dir="/path/to/experiments" seed=42
 #### 🎯 标准GATr（推荐新手）
 ```bash
 python scripts/omad6_experiment.py \
-    base_dir="./experiments" \
+    base_dir="${BASEDIR}" \
     seed=42 \
     model=gatr_omad6 \
     training.steps=5000 \
@@ -100,7 +100,7 @@ python scripts/omad6_experiment.py \
 #### 🎯 轴向GATr（更适合2D图像）
 ```bash
 python scripts/omad6_experiment.py \
-    base_dir="./experiments" \
+    base_dir="${BASEDIR}" \
     seed=42 \
     model=axial_gatr_omad6 \
     training.steps=5000 \
@@ -111,7 +111,7 @@ python scripts/omad6_experiment.py \
 #### 🎯 快速测试（10%数据）
 ```bash
 python scripts/omad6_experiment.py \
-    base_dir="./experiments" \
+    base_dir="${BASEDIR}" \
     seed=42 \
     data.subsample=0.1 \
     training.steps=1000 \

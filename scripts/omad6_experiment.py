@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # Copyright (c) 2024 Qualcomm Technologies, Inc.
 # All rights reserved.
-"""OMAD-6 医学图像分割实验脚本
+"""OMAD-6 图像分割实验脚本
 
-使用GATr进行医学图像分割的训练和评估脚本。
+使用GATr进行图像分割的训练和评估脚本。
 
 用法:
     python scripts/omad6_experiment.py base_dir="/path/to/experiments" seed=42
@@ -74,7 +74,7 @@ def main(cfg: DictConfig) -> None:
         
         # 运行实验
         logger.info("开始训练...")
-        experiment.run()
+        experiment()
         
         logger.info("实验完成！")
         

@@ -158,126 +158,110 @@ class OMAD6Experiment(BaseExperiment):
         
         return total_loss, metrics
     
-    def _compute_metrics(self, predictions: torch.Tensor, targets: torch.Tensor) -> Dict[str, float]:
-        """计算详细的分割指标
+    @torch.no_grad()
+    def _compute_metrics(self, dataloader: DataLoader) -> Dict[str, float]:
+        """计算验证数据集上的详细指标
         
         Parameters
         ----------
-        predictions : torch.Tensor
-            预测logits
-        targets : torch.Tensor  
-            真实标签
+        dataloader : DataLoader
+            验证数据加载器
             
         Returns
         -------
         metrics : dict
-            包含IoU、准确率等指标的字典
+            包含损失、IoU、准确率等指标的字典
         """
-        with torch.no_grad():
-            # 获取预测类别
-            pred_classes = torch.argmax(predictions, dim=-1)  # (batch_size, num_pixels)
-            
-            batch_size = targets.shape[0]
-            metrics = {}
-            
-            # 计算整体准确率
-            correct = (pred_classes == targets).float()
-            valid_mask = (targets != -1)
-            if valid_mask.sum() > 0:
-                overall_accuracy = correct[valid_mask].mean().item()
-            else:
-                overall_accuracy = 0.0
-            
-            metrics['overall_accuracy'] = overall_accuracy
-            
-            # 计算每个类别的IoU
-            class_ious = []
-            for class_id in range(self.num_classes):
-                # 预测为该类别的像素
-                pred_mask = (pred_classes == class_id)
-                # 真实为该类别的像素
-                target_mask = (targets == class_id)
-                
-                # 计算交集和并集
-                intersection = (pred_mask & target_mask & valid_mask).sum().float()
-                union = ((pred_mask | target_mask) & valid_mask).sum().float()
-                
-                if union > 0:
-                    iou = intersection / union
-                    class_ious.append(iou.item())
-                    metrics[f'iou_class_{class_id}'] = iou.item()
-                else:
-                    # 如果该类别在真实标签中不存在，且预测也没有预测该类别，则IoU为1
-                    if pred_mask.sum() == 0:
-                        class_ious.append(1.0)
-                        metrics[f'iou_class_{class_id}'] = 1.0
-                    else:
-                        class_ious.append(0.0)
-                        metrics[f'iou_class_{class_id}'] = 0.0
-            
-            # 平均IoU
-            if class_ious:
-                metrics['mean_iou'] = sum(class_ious) / len(class_ious)
-            else:
-                metrics['mean_iou'] = 0.0
-            
-            return metrics
-    
-    def _evaluate_model(self, tag: str) -> Dict[str, float]:
-        """评估模型性能
-        
-        Parameters
-        ----------
-        tag : str
-            评估数据集标签
-            
-        Returns
-        -------
-        metrics : dict
-            评估指标
-        """
+        assert self.model is not None
         self.model.eval()
-        dataloader = self._load_dataloader(tag)
+        
+        # 移动到评估设备
+        eval_device = torch.device(self.cfg.training.eval_device)
+        self.model = self.model.to(eval_device)
         
         total_loss = 0.0
-        all_metrics = {}
+        all_predictions = []
+        all_targets = []
         num_batches = 0
         
-        with torch.no_grad():
-            for batch_data in dataloader:
-                # 移动到设备
-                pixel_data, labels = batch_data
-                pixel_data = pixel_data.to(self.device)
-                labels = labels.to(self.device)
-                
-                # 前向传播
-                loss, batch_metrics = self._forward(pixel_data, labels)
-                
-                # 累积损失和指标
-                total_loss += loss.item()
-                for key, value in batch_metrics.items():
-                    if key not in all_metrics:
-                        all_metrics[key] = []
-                    all_metrics[key].append(value)
-                
-                # 计算详细指标
-                logits = self.model(pixel_data)
-                detailed_metrics = self._compute_metrics(logits, labels)
-                for key, value in detailed_metrics.items():
-                    if key not in all_metrics:
-                        all_metrics[key] = []
-                    all_metrics[key].append(value)
-                
-                num_batches += 1
+        # 遍历验证数据
+        for batch_data in dataloader:
+            # 移动数据到设备
+            pixel_data, labels = batch_data
+            pixel_data = pixel_data.to(eval_device)
+            labels = labels.to(eval_device)
+            
+            # 前向传播
+            loss, batch_metrics = self._forward(pixel_data, labels)
+            total_loss += loss.item()
+            
+            # 获取预测结果
+            logits = self.model(pixel_data)  # (batch_size, num_pixels, num_classes)
+            predictions = torch.argmax(logits, dim=-1)  # (batch_size, num_pixels)
+            
+            # 收集预测和真实标签
+            all_predictions.append(predictions.flatten())
+            all_targets.append(labels.flatten())
+            
+            num_batches += 1
         
-        # 平均指标
-        avg_metrics = {}
-        avg_metrics['loss'] = total_loss / num_batches if num_batches > 0 else 0.0
+        # 合并所有预测和标签
+        all_predictions = torch.cat(all_predictions, dim=0)  # (total_pixels,)
+        all_targets = torch.cat(all_targets, dim=0)  # (total_pixels,)
         
-        for key, values in all_metrics.items():
-            if values:
-                avg_metrics[key] = sum(values) / len(values)
+        # 计算指标
+        metrics = {}
+        metrics['loss'] = total_loss / num_batches if num_batches > 0 else 0.0
+        
+        # 计算整体准确率
+        valid_mask = (all_targets != -1)
+        if valid_mask.sum() > 0:
+            correct = (all_predictions == all_targets).float()
+            overall_accuracy = correct[valid_mask].mean().item()
+        else:
+            overall_accuracy = 0.0
+        metrics['overall_accuracy'] = overall_accuracy
+        
+        # 计算每个类别的IoU
+        class_ious = []
+        for class_id in range(self.num_classes):
+            # 预测为该类别的像素
+            pred_mask = (all_predictions == class_id)
+            # 真实为该类别的像素
+            target_mask = (all_targets == class_id)
+            
+            # 计算交集和并集
+            intersection = (pred_mask & target_mask & valid_mask).sum().float()
+            union = ((pred_mask | target_mask) & valid_mask).sum().float()
+            
+            if union > 0:
+                iou = intersection / union
+                class_ious.append(iou.item())
+                metrics[f'iou_class_{class_id}'] = iou.item()
             else:
-                avg_metrics[key] = 0.0
+                # 如果该类别不存在且预测也没有该类别，IoU为1
+                if pred_mask.sum() == 0:
+                    class_ious.append(1.0)
+                    metrics[f'iou_class_{class_id}'] = 1.0
+                else:
+                    class_ious.append(0.0)
+                    metrics[f'iou_class_{class_id}'] = 0.0
         
-        return avg_metrics
+        # 平均IoU
+        if class_ious:
+            metrics['mean_iou'] = sum(class_ious) / len(class_ious)
+        else:
+            metrics['mean_iou'] = 0.0
+        
+        return metrics
+    
+    @property
+    def _eval_dataset_tags(self):
+        """评估数据集标签
+        
+        Returns
+        -------
+        tags : set of str
+            评估数据集标签
+        """
+        return {"val"}
