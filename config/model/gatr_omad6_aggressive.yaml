@@ -1,0 +1,21 @@
+# GATr model for OMAD-6 segmentation - Aggressive settings for imbalanced data
+# 针对极度不平衡数据的激进配置
+
+net:
+  _target_: gatr.nets.gatr.GATr
+  in_mv_channels: ${data.mv_channels_in}
+  out_mv_channels: ${data.mv_channels_out}
+  hidden_mv_channels: 48  # 增加隐藏层维度
+  in_s_channels: ${data.scalar_channels_in}
+  out_s_channels: ${data.scalar_channels_out}
+  hidden_s_channels: 24   # 增加标量隐藏维度
+  num_blocks: 12          # 增加网络深度
+  dropout_prob: 0.05      # 降低dropout，避免抑制前景类学习
+  checkpoint: null
+
+_target_: gatr.experiments.omad6.wrappers.OMAD6GATrWrapper
+num_classes: ${data.num_classes}
+
+defaults:
+  - /base_attention@net.attention
+  - /base_mlp@net.mlp

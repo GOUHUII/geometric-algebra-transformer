@@ -69,13 +69,36 @@ class OMAD6GATrWrapper(BaseWrapper):
         GATr模型，应该接受4个多重向量通道和1个标量通道的输入，
         返回1个多重向量通道和1个标量通道的输出
     num_classes : int, optional
-        分割类别数量，默认为11（包含背景类）
+        分割类别数量，默认为7（包含背景类）
     """
     
-    def __init__(self, net: torch.nn.Module, num_classes: int = 11):
+    def __init__(self, net: torch.nn.Module, num_classes: int = 7):
         super().__init__(net, scalars=True, return_other=False)
         self.num_classes = num_classes
         self.supports_variable_items = True
+        
+        # 改进的分类头：使用更多特征
+        # 从multivector提取多个特征 + scalar特征
+        mv_feature_dim = 16  # multivector的维度
+        scalar_feature_dim = 1  # scalar的维度
+        total_features = mv_feature_dim + scalar_feature_dim
+        
+        # 使用多层分类头提升表达能力
+        self.classification_head = torch.nn.Sequential(
+            torch.nn.Linear(total_features, 128),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.1),
+            torch.nn.Linear(128, 64),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.1),
+            torch.nn.Linear(64, num_classes)
+        )
+        
+        # 使用适当的初始化
+        for layer in self.classification_head:
+            if isinstance(layer, torch.nn.Linear):
+                torch.nn.init.xavier_uniform_(layer.weight)
+                torch.nn.init.zeros_(layer.bias)
     
     def embed_into_ga(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """将原始像素数据嵌入到几何代数表示中
@@ -123,18 +146,15 @@ class OMAD6GATrWrapper(BaseWrapper):
         """
         batch_size, num_pixels = multivector.shape[:2]
         
-        # 从多重向量和标量中提取特征
-        # 使用标量部分作为分类特征
-        mv_scalar_features = extract_scalar(multivector)  # (batch_size, num_pixels, 1, 1)
-        mv_scalar_features = mv_scalar_features.squeeze(-1)  # (batch_size, num_pixels, 1)
+        # 从多重向量中提取完整特征（使用所有16个分量）
+        mv_features = multivector.squeeze(-2)  # (batch_size, num_pixels, 16)
         
-        # 合并特征
-        combined_features = torch.cat([mv_scalar_features, scalars], dim=-1)  # (batch_size, num_pixels, 2)
+        # 合并multivector特征和scalar特征
+        combined_features = torch.cat([mv_features, scalars], dim=-1)  # (batch_size, num_pixels, 17)
         
-        # 简单的线性分类器将特征映射到类别logits
-        # 在更复杂的实现中，这里可以使用更复杂的分类头
-        if not hasattr(self, 'classification_head'):
-            self.classification_head = torch.nn.Linear(2, self.num_classes).to(multivector.device)
+        # 确保分类头在正确的设备上
+        if self.classification_head[0].weight.device != multivector.device:
+            self.classification_head = self.classification_head.to(multivector.device)
         
         # 生成分割logits
         segmentation_logits = self.classification_head(combined_features)  # (batch_size, num_pixels, num_classes)
@@ -153,16 +173,41 @@ class OMAD6AxialGATrWrapper(BaseWrapper):
     net : torch.nn.Module
         AxialGATr模型
     num_classes : int, optional
-        分割类别数量，默认为11
+        分割类别数量，默认为7
     image_size : int, optional
         图像尺寸，用于重塑为2D网格，默认为256
     """
     
-    def __init__(self, net: torch.nn.Module, num_classes: int = 11, image_size: int = 256):
+    def __init__(self, net: torch.nn.Module, num_classes: int = 7, image_size: int = 256):
         super().__init__(net, scalars=True, return_other=False)
         self.num_classes = num_classes
         self.image_size = image_size
-        self.supports_variable_items = False  # AxialGATr需要固定的网格大小
+        self.supports_variable_items = False  # 轴向GATr需要固定的2D网格
+        
+        # 改进的分类头：使用更多特征
+        mv_feature_dim = 16  # multivector的维度
+        scalar_feature_dim = 1  # scalar的维度
+        total_features = mv_feature_dim + scalar_feature_dim
+        
+        # 使用多层分类头
+        # 使用更小的分类头以节省内存
+        self.classification_head = torch.nn.Sequential(
+            torch.nn.Linear(total_features, 128),
+            # torch.nn.Linear(total_features, 32),  # 减少中间层大小
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.1),
+            torch.nn.Linear(128, 64),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.1),
+            torch.nn.Linear(64, num_classes)
+            # torch.nn.Linear(32, num_classes)
+        )
+        
+        # 使用适当的初始化
+        for layer in self.classification_head:
+            if isinstance(layer, torch.nn.Linear):
+                torch.nn.init.xavier_uniform_(layer.weight)
+                torch.nn.init.zeros_(layer.bias)
     
     def embed_into_ga(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """将像素数据嵌入并重塑为2D网格格式
@@ -185,7 +230,25 @@ class OMAD6AxialGATrWrapper(BaseWrapper):
         # 首先进行常规的GA嵌入
         mv_flat = embed_pixel_data_in_pga(inputs)  # (batch_size, num_pixels, 4, 16)
         
-        # 重塑为2D网格（假设像素是按行主序排列的）
+        # 检查像素数量是否匹配预期的图像尺寸
+        expected_pixels = H * W
+        actual_pixels = mv_flat.shape[1]
+        
+        if actual_pixels != expected_pixels:
+            # 如果像素数量不匹配，我们需要调整
+            if actual_pixels < expected_pixels:
+                # 像素数量不足，进行padding
+                pad_size = expected_pixels - actual_pixels
+                mv_flat = torch.cat([
+                    mv_flat,
+                    torch.zeros(batch_size, pad_size, 4, 16, 
+                              device=mv_flat.device, dtype=mv_flat.dtype)
+                ], dim=1)
+            else:
+                # 像素数量过多，进行截断
+                mv_flat = mv_flat[:, :expected_pixels, :, :]
+        
+        # 重塑为2D网格 (batch_size, H, W, 4, 16)
         mv_inputs = mv_flat.view(batch_size, H, W, 4, 16)
         
         # 创建2D网格标量输入
@@ -215,16 +278,15 @@ class OMAD6AxialGATrWrapper(BaseWrapper):
         """
         batch_size, H, W = multivector.shape[:3]
         
-        # 提取标量特征
-        mv_scalar_features = extract_scalar(multivector)  # (batch_size, H, W, 1, 1)
-        mv_scalar_features = mv_scalar_features.squeeze(-1)  # (batch_size, H, W, 1)
+        # 提取完整的multivector特征
+        mv_features = multivector.squeeze(-2)  # (batch_size, H, W, 16)
         
         # 合并特征
-        combined_features = torch.cat([mv_scalar_features, scalars], dim=-1)  # (batch_size, H, W, 2)
+        combined_features = torch.cat([mv_features, scalars], dim=-1)  # (batch_size, H, W, 17)
         
-        # 分类头
-        if not hasattr(self, 'classification_head'):
-            self.classification_head = torch.nn.Linear(2, self.num_classes).to(multivector.device)
+        # 确保分类头在正确的设备上
+        if self.classification_head[0].weight.device != multivector.device:
+            self.classification_head = self.classification_head.to(multivector.device)
         
         # 生成分割logits
         segmentation_logits = self.classification_head(combined_features)  # (batch_size, H, W, num_classes)

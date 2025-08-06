@@ -16,7 +16,7 @@ data:
   # 数据参数
   image_size: 256  # 图像尺寸
   max_items: 1024  # 每张图像最大像素数量
-  num_classes: 11  # 分割类别数量（包含背景）
+  num_classes: 7   # 分割类别数量：背景(0) + 6个海岸养殖地物类别(TCC, DWCC, FRC, LC, RC, BC)
   
   # 网络输入输出通道
   mv_channels_in: 4    # 多重向量输入通道：坐标点 + R + G + B
@@ -25,22 +25,23 @@ data:
   scalar_channels_out: 1  # 标量输出通道
 
 training:
-  # 训练参数
-  steps: 10000
-  batchsize: 4  # 较小的批次大小，因为图像分割内存消耗大
+  # 训练参数 - 优化以提升全类别学习
+  steps: 20000  # 训练步数
+  batchsize: 4  # 批次大小
   eval_batchsize: 2
   
-  # 优化器参数
-  lr: 1e-4  # 较小的学习率，适合图像分割
-  lr_decay: 0.1
-  clip_grad_norm: 1.0
-  weight_decay: 1e-4
+  # 优化器参数 - 基于训练结果优化
+  lr: 1e-3  # 学习率
+  lr_decay: 0.5  # 学习率衰减
+  clip_grad_norm: 0.5  # 梯度裁剪
+  weight_decay: 5e-5  # 权重衰减
   
   # 训练策略
   early_stopping: true
+  use_focal_loss: true   # 使用Focal Loss处理数据不平衡
   
   # 精度和优化
-  float16: false  # 暂时禁用混合精度，避免数值不稳定
+  float16: false  # 混合精度训练
   ema: false
   
   # 日志和验证频率

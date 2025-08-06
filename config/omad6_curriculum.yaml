@@ -1,0 +1,60 @@
+# OMAD-6 课程学习配置 - 分阶段提升所有类别
+# 通过不同阶段的训练策略确保所有类别都能学习
+
+defaults:
+  - /base_experiment
+  - /base_attention@model.net.attention  
+  - /base_mlp@model.net.mlp
+  - _self_
+
+exp_name: omad6
+data_dir: ${base_dir}/data/OMAD-6
+subsample: null  # 子采样率，用于快速实验
+
+# 数据参数
+image_size: 256  # 图像尺寸
+max_items: 2048  # 增加每张图像像素采样数，提供更多训练样本
+num_classes: 7   # 分割类别数量：背景(0) + 6个海岸养殖地物类别
+
+# 网络输入输出通道
+mv_channels_in: 4    # 多重向量输入通道：坐标点 + R + G + B
+mv_channels_out: 1   # 多重向量输出通道：分割特征
+scalar_channels_in: 1   # 标量输入通道
+scalar_channels_out: 1  # 标量输出通道
+
+training:
+  # 课程学习参数 - 分三个阶段
+  steps: 25000  # 总训练步数
+  batchsize: 4  
+  eval_batchsize: 2
+  
+  # 优化器参数 - 课程学习策略
+  lr: 2e-3  # 初始较高学习率
+  lr_decay: 0.3  # 更激进的学习率衰减，分阶段降低
+  clip_grad_norm: 0.3  # 更严格的梯度裁剪
+  weight_decay: 1e-5  # 很低的正则化
+  
+  # 训练策略
+  early_stopping: false  # 禁用早停，确保充分训练
+  use_focal_loss: true   # 使用Focal Loss
+  
+  # 课程学习策略
+  curriculum_learning: true
+  stage1_steps: 8000   # 阶段1：学习基础类别
+  stage2_steps: 8000   # 阶段2：平衡所有类别  
+  stage3_steps: 9000   # 阶段3：精细化调优
+  
+  # 精度和优化
+  float16: false
+  ema: false
+  
+  # 验证和日志
+  validate_every_n_steps: 1000
+  log_every_n_steps: 100
+  plot_every_n_steps: 5000
+  save_model_every_n_steps: 2500
+  update_lr_every_n_steps: 2500
+
+mlflow:
+  db: ${base_dir}/tracking/mlflow.db
+  artifacts: ${base_dir}/tracking/artifacts

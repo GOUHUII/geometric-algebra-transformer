@@ -13,10 +13,32 @@ from gatr.experiments.base_experiment import BaseExperiment
 from gatr.experiments.omad6.dataset import OMAD6Dataset, collate_fn
 
 
-class OMAD6Experiment(BaseExperiment):
-    """OMAD-6图像分割实验管理器
+class FocalLoss(torch.nn.Module):
+    """Focal Loss for addressing class imbalance"""
     
-    管理医学图像分割任务的训练、验证和测试流程。
+    def __init__(self, alpha=1, gamma=2, weight=None, ignore_index=-100):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.weight = weight
+        self.ignore_index = ignore_index
+        
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(
+            inputs, targets, 
+            weight=self.weight, 
+            ignore_index=self.ignore_index, 
+            reduction='none'
+        )
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1-pt)**self.gamma * ce_loss
+        return focal_loss.mean()
+
+
+class OMAD6Experiment(BaseExperiment):
+    """OMAD-6海岸养殖地物遥感图像分割实验管理器
+    
+    管理海岸养殖地物遥感图像分割任务的训练、验证和测试流程。
     包括损失计算、指标评估、数据加载等功能。
     
     Parameters
@@ -28,11 +50,31 @@ class OMAD6Experiment(BaseExperiment):
     def __init__(self, cfg):
         super().__init__(cfg)
         
-        # 分割损失函数
-        self._ce_criterion = torch.nn.CrossEntropyLoss(ignore_index=-1)
+        # 用于计算IoU等指标 - 7个类别（背景+6个海岸养殖地物类别）
+        self.num_classes = cfg.data.get('num_classes', 7)
         
-        # 用于计算IoU等指标
-        self.num_classes = cfg.data.get('num_classes', 11)
+        # 动态权重策略 - 基于类别频率计算，避免硬编码
+        # 默认权重，实际训练时会根据数据分布动态调整
+        class_weights = torch.ones(self.num_classes)
+        
+        # 选择损失函数 - 可以在配置中选择
+        use_focal_loss = cfg.training.get('use_focal_loss', False)
+        
+        if use_focal_loss:
+            # 使用Focal Loss处理极度不平衡的数据，加强难例学习
+            self._ce_criterion = FocalLoss(
+                alpha=2.0,    # 增加alpha，更关注难例
+                gamma=3.0,    # 增加gamma，更强烈抑制简单样本
+                weight=class_weights,
+                ignore_index=-1
+            )
+        else:
+            # 使用加权交叉熵
+            self._ce_criterion = torch.nn.CrossEntropyLoss(
+                weight=class_weights, 
+                ignore_index=-1,
+                label_smoothing=0.1  # 添加标签平滑
+            )
     
     def _load_dataset(self, tag: str) -> OMAD6Dataset:
         """加载数据集
@@ -71,29 +113,23 @@ class OMAD6Experiment(BaseExperiment):
         
         return dataset
     
-    def _load_dataloader(self, tag: str) -> DataLoader:
-        """创建数据加载器
+    def _make_data_loader(self, dataset, batch_size, shuffle):
+        """创建数据加载器 - 覆盖基类方法以使用自定义collate_fn
         
         Parameters
         ----------
-        tag : str
-            数据集标签
+        dataset : OMAD6Dataset
+            数据集实例
+        batch_size : int
+            批次大小
+        shuffle : bool
+            是否打乱数据
             
         Returns
         -------
         dataloader : DataLoader
             PyTorch数据加载器
         """
-        dataset = self._load_dataset(tag)
-        
-        # 根据标签确定批次大小和是否打乱
-        if tag == "train":
-            batch_size = self.cfg.training.batchsize
-            shuffle = True
-        else:
-            batch_size = self.cfg.training.get('eval_batchsize', self.cfg.training.batchsize)
-            shuffle = False
-        
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -132,10 +168,15 @@ class OMAD6Experiment(BaseExperiment):
         logits_flat = logits.view(-1, num_classes)  # (batch_size * num_pixels, num_classes)
         labels_flat = labels.view(-1)  # (batch_size * num_pixels,)
         
+        # 确保损失函数权重在正确的设备上
+        if hasattr(self._ce_criterion, 'weight') and self._ce_criterion.weight is not None:
+            if self._ce_criterion.weight.device != pixel_data.device:
+                self._ce_criterion.weight = self._ce_criterion.weight.to(pixel_data.device)
+        
         # 计算交叉熵损失
         ce_loss = self._ce_criterion(logits_flat, labels_flat)
         
-        # 总损失
+        # 简化困难样本挖掘逻辑，避免过度复杂化
         total_loss = ce_loss
         
         # 计算准确率
@@ -177,6 +218,7 @@ class OMAD6Experiment(BaseExperiment):
         
         # 移动到评估设备
         eval_device = torch.device(self.cfg.training.eval_device)
+        original_device = next(self.model.parameters()).device
         self.model = self.model.to(eval_device)
         
         total_loss = 0.0
@@ -195,7 +237,7 @@ class OMAD6Experiment(BaseExperiment):
             loss, batch_metrics = self._forward(pixel_data, labels)
             total_loss += loss.item()
             
-            # 获取预测结果
+            # 获取预测结果 - 直接使用_forward中的logits
             logits = self.model(pixel_data)  # (batch_size, num_pixels, num_classes)
             predictions = torch.argmax(logits, dim=-1)  # (batch_size, num_pixels)
             
@@ -204,6 +246,9 @@ class OMAD6Experiment(BaseExperiment):
             all_targets.append(labels.flatten())
             
             num_batches += 1
+        
+        # 将模型移回原始设备
+        self.model = self.model.to(original_device)
         
         # 合并所有预测和标签
         all_predictions = torch.cat(all_predictions, dim=0)  # (total_pixels,)
@@ -224,34 +269,62 @@ class OMAD6Experiment(BaseExperiment):
         
         # 计算每个类别的IoU
         class_ious = []
+        present_classes = []  # 记录数据中实际存在的类别
+        
         for class_id in range(self.num_classes):
             # 预测为该类别的像素
             pred_mask = (all_predictions == class_id)
             # 真实为该类别的像素
             target_mask = (all_targets == class_id)
             
-            # 计算交集和并集
-            intersection = (pred_mask & target_mask & valid_mask).sum().float()
-            union = ((pred_mask | target_mask) & valid_mask).sum().float()
+            # 只在有效区域内计算
+            pred_mask_valid = pred_mask & valid_mask
+            target_mask_valid = target_mask & valid_mask
             
-            if union > 0:
-                iou = intersection / union
-                class_ious.append(iou.item())
-                metrics[f'iou_class_{class_id}'] = iou.item()
-            else:
-                # 如果该类别不存在且预测也没有该类别，IoU为1
-                if pred_mask.sum() == 0:
-                    class_ious.append(1.0)
-                    metrics[f'iou_class_{class_id}'] = 1.0
+            # 检查该类别是否在真实数据中存在
+            target_exists = target_mask_valid.sum() > 0
+            pred_exists = pred_mask_valid.sum() > 0
+            
+            if target_exists:
+                # 类别在数据中存在，计算真实IoU
+                intersection = (pred_mask_valid & target_mask_valid).sum().float()
+                union = (pred_mask_valid | target_mask_valid).sum().float()
+                
+                if union > 0:
+                    iou = intersection / union
                 else:
-                    class_ious.append(0.0)
-                    metrics[f'iou_class_{class_id}'] = 0.0
+                    iou = 0.0
+                    
+                class_ious.append(iou.item())
+                present_classes.append(class_id)
+                metrics[f'iou_class_{class_id}'] = iou.item()
+                
+            elif not pred_exists:
+                # 类别不存在且模型也没预测 - 正确的负样本
+                iou = 1.0
+                class_ious.append(iou)
+                metrics[f'iou_class_{class_id}'] = iou
+                
+            else:
+                # 类别不存在但模型错误预测了 - 假阳性
+                iou = 0.0
+                class_ious.append(iou)
+                metrics[f'iou_class_{class_id}'] = iou
         
-        # 平均IoU
+        # 计算平均IoU
         if class_ious:
             metrics['mean_iou'] = sum(class_ious) / len(class_ious)
         else:
             metrics['mean_iou'] = 0.0
+        
+        # 计算存在类别的平均IoU
+        if present_classes:
+            present_ious = [metrics[f'iou_class_{cls}'] for cls in present_classes]
+            metrics['mean_iou_present'] = sum(present_ious) / len(present_ious)
+            metrics['num_present_classes'] = len(present_classes)
+        else:
+            metrics['mean_iou_present'] = 0.0
+            metrics['num_present_classes'] = 0
         
         return metrics
     
