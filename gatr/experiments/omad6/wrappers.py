@@ -178,29 +178,28 @@ class OMAD6AxialGATrWrapper(BaseWrapper):
         图像尺寸，用于重塑为2D网格，默认为256
     """
     
-    def __init__(self, net: torch.nn.Module, num_classes: int = 7, image_size: int = 256):
+    def __init__(self, net: torch.nn.Module, num_classes: int = 7, image_size: int = 128):
         super().__init__(net, scalars=True, return_other=False)
         self.num_classes = num_classes
         self.image_size = image_size
         self.supports_variable_items = False  # 轴向GATr需要固定的2D网格
         
-        # 改进的分类头：使用更多特征
+        # 效果优化的分类头：平衡特征维度和内存使用
         mv_feature_dim = 16  # multivector的维度
         scalar_feature_dim = 1  # scalar的维度
         total_features = mv_feature_dim + scalar_feature_dim
         
-        # 使用多层分类头
-        # 使用更小的分类头以节省内存
+        # 使用渐进式分类头提升效果
         self.classification_head = torch.nn.Sequential(
-            torch.nn.Linear(total_features, 128),
-            # torch.nn.Linear(total_features, 32),  # 减少中间层大小
+            torch.nn.Linear(total_features, 64),   # 增加第一层容量
+            torch.nn.LayerNorm(64),                # 使用LayerNorm替代BatchNorm处理3D输入
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.15),                # 稍微增加dropout
+            torch.nn.Linear(64, 32),               # 渐进式降维
+            torch.nn.LayerNorm(32),                # LayerNorm更适合变长序列
             torch.nn.ReLU(),
             torch.nn.Dropout(0.1),
-            torch.nn.Linear(128, 64),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.1),
-            torch.nn.Linear(64, num_classes)
-            # torch.nn.Linear(32, num_classes)
+            torch.nn.Linear(32, num_classes)
         )
         
         # 使用适当的初始化

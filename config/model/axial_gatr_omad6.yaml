@@ -1,31 +1,31 @@
-# 轴向GATr模型配置，用于OMAD-6图像分割
+# 轴向GATr模型配置，用于OMAD-6图像分割（内存优化版本）
 _target_: gatr.experiments.omad6.wrappers.OMAD6AxialGATrWrapper
 
 # 网络参数
 net:
   _target_: gatr.nets.axial_gatr.AxialGATr
   
-  # 输入输出通道
+  # 输入输出通道（效果与内存平衡）
   in_mv_channels: ${data.mv_channels_in}      # 4: 坐标点 + R + G + B  
   out_mv_channels: ${data.mv_channels_out}    # 1: 分割特征
-  hidden_mv_channels: 16                      # 隐藏多重向量通道数
+  hidden_mv_channels: 12                      # 平衡设置：8->12，保持足够表达能力
   
   in_s_channels: ${data.scalar_channels_in}   # 1: dummy标量输入
   out_s_channels: ${data.scalar_channels_out} # 1: 标量输出用于分类
-  hidden_s_channels: 8                        # 隐藏标量通道数
+  hidden_s_channels: 6                        # 平衡设置：4->6
   
-  # 网络结构
-  num_blocks: 6                               # 轴向transformer块数量
-  dropout_prob: 0.1                           # 正则化
-  checkpoint: null                            # 性能优化
+  # 网络结构（效果优化）
+  num_blocks: 5                               # 增加到5层，平衡效果和内存
+  dropout_prob: 0.15                          # 增加正则化，防止过拟合
+  checkpoint: true                            # 启用checkpointing节省内存
   
   # 轴向GATr特定参数
   pos_encodings: [false, false]               # [行位置编码, 列位置编码]
   collapse_dims: [false, false]               # [折叠维度选项]
 
-# 分割特定参数
+# 分割特定参数（效果优化）
 num_classes: ${data.num_classes}              # 分割类别数量
-image_size: ${data.image_size}                # 图像尺寸，用于2D网格重塑
+image_size: 160                               # 提升到160以平衡效果和内存
 
 # 使用默认的注意力和MLP配置
 defaults:

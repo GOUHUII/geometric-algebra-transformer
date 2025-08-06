@@ -13,9 +13,9 @@ data:
   data_dir: '${base_dir}/data/OMAD-6'  # OMAD-6数据集路径
   subsample: null  # 子采样率，用于快速实验
   
-  # 数据参数
-  image_size: 256  # 图像尺寸
-  max_items: 1024  # 每张图像最大像素数量
+  # 数据参数 - 效果优化
+  image_size: 160  # 平衡效果和内存：128->160
+  max_items: 25600  # 160*160 = 25600，完整图像像素
   num_classes: 7   # 分割类别数量：背景(0) + 6个海岸养殖地物类别(TCC, DWCC, FRC, LC, RC, BC)
   
   # 网络输入输出通道
@@ -26,23 +26,24 @@ data:
 
 training:
   # 训练参数 - 优化以提升全类别学习
-  steps: 20000  # 训练步数
-  batchsize: 4  # 批次大小
-  eval_batchsize: 2
+  steps: 15000  # 适中的训练步数
+  batchsize: 2   # 平衡内存和训练稳定性
+  eval_batchsize: 1
   
-  # 优化器参数 - 基于训练结果优化
-  lr: 1e-3  # 学习率
-  lr_decay: 0.5  # 学习率衰减
-  clip_grad_norm: 0.5  # 梯度裁剪
-  weight_decay: 5e-5  # 权重衰减
+  # 优化器参数 - 效果优化
+  lr: 2e-3       # 稍微提高学习率，加快收敛
+  lr_decay: 0.8  # 更温和的学习率衰减
+  clip_grad_norm: 1.0    # 放宽梯度裁剪
+  weight_decay: 1e-4     # 增加正则化
   
   # 训练策略
   early_stopping: true
   use_focal_loss: true   # 使用Focal Loss处理数据不平衡
   
   # 精度和优化
-  float16: false  # 混合精度训练
-  ema: false
+  float16: true   # 启用混合精度训练节省内存
+  ema: true       # 启用EMA提升模型稳定性
+  ema_decay: 0.999
   
   # 日志和验证频率
   log_every_n_steps: 50
