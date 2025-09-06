@@ -19,7 +19,7 @@ data:
   num_classes: 7   # 分割类别数量：背景(0) + 6个海岸养殖地物类别(TCC, DWCC, FRC, LC, RC, BC)
   
   # 网络输入输出通道
-  mv_channels_in: 4    # 多重向量输入通道：坐标点 + R + G + B
+  mv_channels_in: 3    # 多重向量输入通道：仅 R + G + B（移除坐标）
   mv_channels_out: 1   # 多重向量输出通道：分割特征
   scalar_channels_in: 1   # 标量输入通道
   scalar_channels_out: 1  # 标量输出通道

@@ -114,8 +114,8 @@ class OMAD6Dataset(Dataset):
         
         Returns
         -------
-        pixel_data : torch.Tensor with shape (num_pixels, 5)
-            像素数据：[x坐标, y坐标, R, G, B]
+        pixel_data : torch.Tensor with shape (num_pixels, 3)
+            像素数据：[R, G, B]
         segmentation_labels : torch.Tensor with shape (num_pixels,)
             分割标签，0表示背景，1-N表示不同的解剖结构
         """
@@ -247,27 +247,15 @@ class OMAD6Dataset(Dataset):
         mask[y:y+h, x:x+w] = label
     
     def _image_to_pixels(self, image: torch.Tensor, mask: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor]:
-        """将图像转换为像素级数据"""
+        """将图像转换为像素级数据（仅 RGB 通道）"""
         C, H, W = image.shape
         
-        # 创建坐标网格
-        y_coords, x_coords = torch.meshgrid(
-            torch.linspace(-1, 1, H),
-            torch.linspace(-1, 1, W),
-            indexing='ij'
-        )
-        
         # 重塑数据
-        x_coords = x_coords.flatten()  # (H*W,)
-        y_coords = y_coords.flatten()  # (H*W,)
         rgb_values = image.permute(1, 2, 0).flatten(0, 1)  # (H*W, 3)
         labels = torch.from_numpy(mask).flatten()  # (H*W,)
         
-        # 组合像素数据：[x, y, R, G, B]
-        pixel_data = torch.stack([
-            x_coords, y_coords,
-            rgb_values[:, 0], rgb_values[:, 1], rgb_values[:, 2]
-        ], dim=1)  # (H*W, 5)
+        # 像素数据：[R, G, B]
+        pixel_data = rgb_values  # (H*W, 3)
         
         # 检查是否需要智能采样
         # 对于轴向GATr，我们需要完整的图像像素

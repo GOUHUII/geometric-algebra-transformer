@@ -13,48 +13,53 @@ from gatr.interface import embed_point, embed_scalar, extract_scalar
 def embed_pixel_data_in_pga(pixel_data: torch.Tensor) -> torch.Tensor:
     """将像素数据嵌入到投影几何代数中
     
-    将2D像素坐标和RGB值嵌入为多重向量。坐标被嵌入为点(trivectors)，
-    RGB值被嵌入为标量。
+    支持两种输入格式：
+    - 旧格式：[x, y, R, G, B]（将坐标嵌入为点，RGB 作为标量）
+    - 新格式：[R, G, B]（仅将 RGB 作为标量通道嵌入）
     
     Parameters
     ----------
-    pixel_data : torch.Tensor with shape (batch_size, num_pixels, 5)
-        像素数据: [x坐标, y坐标, R, G, B]，坐标范围为[-1, 1]，RGB范围为[0, 1]
+    pixel_data : torch.Tensor with shape (batch_size, num_pixels, 3) 或 (batch_size, num_pixels, 5)
+        像素数据
     
     Returns
     -------
-    multivector : torch.Tensor with shape (batch_size, num_pixels, 4, 16)
-        几何代数嵌入，包含4个通道：
-        - 通道0: 2D坐标点 (使用z=0扩展为3D)
-        - 通道1: R通道标量
-        - 通道2: G通道标量  
-        - 通道3: B通道标量
+    multivector : torch.Tensor with shape (batch_size, num_pixels, C, 16)
+        几何代数嵌入，C 为通道数：
+        - 新格式：C=3（R/G/B 标量通道）
+        - 旧格式：C=4（点 + R/G/B）
     """
-    batch_size, num_pixels, _ = pixel_data.shape
-    
-    # 提取坐标和RGB值
-    coordinates_2d = pixel_data[:, :, :2]  # (batch_size, num_pixels, 2)
-    rgb_values = pixel_data[:, :, 2:5]     # (batch_size, num_pixels, 3)
-    
-    # 将2D坐标扩展为3D（z=0）
-    coordinates_3d = torch.cat([
-        coordinates_2d, 
-        torch.zeros_like(coordinates_2d[:, :, :1])
-    ], dim=-1)  # (batch_size, num_pixels, 3)
-    
-    # 嵌入坐标为点 (trivectors)
-    points = embed_point(coordinates_3d)  # (batch_size, num_pixels, 16)
-    
-    # 嵌入RGB值为标量
-    r_scalars = embed_scalar(rgb_values[:, :, [0]])  # (batch_size, num_pixels, 16)
-    g_scalars = embed_scalar(rgb_values[:, :, [1]])  # (batch_size, num_pixels, 16)
-    b_scalars = embed_scalar(rgb_values[:, :, [2]])  # (batch_size, num_pixels, 16)
-    
-    # 堆叠为多通道多重向量
-    multivector = torch.stack([points, r_scalars, g_scalars, b_scalars], dim=2)
-    # (batch_size, num_pixels, 4, 16)
-    
-    return multivector
+    batch_size, num_pixels, num_features = pixel_data.shape
+
+    if num_features == 3:
+        # 新格式：仅 RGB -> 3 个标量通道
+        rgb_values = pixel_data  # (batch_size, num_pixels, 3)
+        r_scalars = embed_scalar(rgb_values[:, :, [0]])
+        g_scalars = embed_scalar(rgb_values[:, :, [1]])
+        b_scalars = embed_scalar(rgb_values[:, :, [2]])
+        multivector = torch.stack([r_scalars, g_scalars, b_scalars], dim=2)
+        # (batch_size, num_pixels, 3, 16)
+        return multivector
+
+    if num_features == 5:
+        # 兼容旧格式：[x,y,R,G,B]
+        coordinates_2d = pixel_data[:, :, :2]
+        rgb_values = pixel_data[:, :, 2:5]
+        coordinates_3d = torch.cat([
+            coordinates_2d,
+            torch.zeros_like(coordinates_2d[:, :, :1])
+        ], dim=-1)  # (batch_size, num_pixels, 3)
+        points = embed_point(coordinates_3d)
+        r_scalars = embed_scalar(rgb_values[:, :, [0]])
+        g_scalars = embed_scalar(rgb_values[:, :, [1]])
+        b_scalars = embed_scalar(rgb_values[:, :, [2]])
+        multivector = torch.stack([points, r_scalars, g_scalars, b_scalars], dim=2)
+        # (batch_size, num_pixels, 4, 16)
+        return multivector
+
+    raise ValueError(
+        f"Unsupported pixel_data feature dimension: {num_features}. Expected 3 or 5."
+    )
 
 
 class OMAD6GATrWrapper(BaseWrapper):
@@ -77,10 +82,10 @@ class OMAD6GATrWrapper(BaseWrapper):
         self.num_classes = num_classes
         self.supports_variable_items = True
         
-        # 改进的分类头：使用更多特征
-        # 从multivector提取多个特征 + scalar特征
-        mv_feature_dim = 16  # multivector的维度
-        scalar_feature_dim = 1  # scalar的维度
+        # 当输入为仅RGB时，multivector通道数为3；保守起见，按单通道特征聚合
+        # 分类头输入特征 = 16 (mv) + 1 (scalar)
+        mv_feature_dim = 16
+        scalar_feature_dim = 1
         total_features = mv_feature_dim + scalar_feature_dim
         
         # 使用多层分类头提升表达能力
@@ -105,17 +110,17 @@ class OMAD6GATrWrapper(BaseWrapper):
         
         Parameters
         ----------
-        inputs : torch.Tensor with shape (batch_size, num_pixels, 5)
-            像素数据: [x坐标, y坐标, R, G, B]
+        inputs : torch.Tensor with shape (batch_size, num_pixels, 3) 或 (batch_size, num_pixels, 5)
+            像素数据（优先新格式 [R,G,B]）
         
         Returns
         -------
-        mv_inputs : torch.Tensor with shape (batch_size, num_pixels, 4, 16)
-            多重向量输入
+        mv_inputs : torch.Tensor with shape (batch_size, num_pixels, C, 16)
+            多重向量输入（C=3 for RGB-only, C=4 for legacy）
         scalar_inputs : torch.Tensor with shape (batch_size, num_pixels, 1)
             标量输入（dummy标量）
         """
-        # 将像素数据嵌入到PGA中
+        # 将像素数据嵌入到PGA中（兼容3通道与5通道）
         mv_inputs = embed_pixel_data_in_pga(inputs)
         
         # 创建dummy标量输入
@@ -132,8 +137,8 @@ class OMAD6GATrWrapper(BaseWrapper):
         
         Parameters
         ----------
-        multivector : torch.Tensor with shape (batch_size, num_pixels, 1, 16)
-            输出多重向量
+        multivector : torch.Tensor with shape (batch_size, num_pixels, C, 16)
+            输出多重向量（C 由模型 out_mv_channels 决定，常见为1）
         scalars : torch.Tensor with shape (batch_size, num_pixels, 1)
             输出标量
         

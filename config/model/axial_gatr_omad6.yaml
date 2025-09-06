@@ -6,7 +6,7 @@ net:
   _target_: gatr.nets.axial_gatr.AxialGATr
   
   # 输入输出通道（效果与内存平衡）
-  in_mv_channels: ${data.mv_channels_in}      # 4: 坐标点 + R + G + B  
+  in_mv_channels: ${data.mv_channels_in}      # 3: R + G + B（RGB-only 输入）  
   out_mv_channels: ${data.mv_channels_out}    # 1: 分割特征
   hidden_mv_channels: 12                      # 平衡设置：8->12，保持足够表达能力
   
